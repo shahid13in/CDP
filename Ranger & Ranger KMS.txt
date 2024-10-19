@@ -1,0 +1,164 @@
+Ranger => Authorization
+Ranger is an Apache Hadoop security module for centrally managing security across the Hadoop platform. It provides a central platform for unified security administration across the components of Hadoop ecosystem such as Apache Hive, HBase, Apache Solr, HDFS, YARN and Kafka. Ranger enables organizations to set, enforce and audit security policies for all the components of their Hadoop ecosystem.
+
+Ranger RMS => Authorization
+(Ranger Mapping Service)
+
+Ranger KMS => Data at Rest Encryption 
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+1. Add Service => Solr
+
+2. Add SErvice => Ranger => Ranger Admin User Initial Password -> Ranger Usersync User Initial Password -> Ranger Tagsync User Initial Password -> Ranger KMS Keyadmin User Initial Password => Set Password Here
+Manchester@1
+3. go to Ranger => Configuration => 
+
+	Search Minimum User ID -> 1000 
+
+	Ranger Usersync -> Source for Syncing User and Groups ->  org.apache.ranger.ldapusersync.process.LdapUserGroupBuilder
+
+	Usersync LDAP/AD URL -> ldap://hadoop-ad.hadoopsecurity.local
+
+	Usersync Bind User -> CN=cm,OU=hadoop,DC=HADOOPSECURITY,DC=LOCAL
+
+	Usersync Bind User Password -> Mycomputer1
+
+	Usersync User Search Base -> OU=hadoop,DC=HADOOPSECURITY,DC=LOCAL
+
+4. CDP-INFRA-SOLR => Stale Configuration
+(getting error while start services)
+
+
+5. go to CDP-INFRA-SOLAR -> Action -> Initialize Solr -> Create HDFS Home Dir ->  Deploy Client Configuration
+
+6. go to Home => Deploy Client Configuration and Refresh
+
+7. Start the Cluster
+(if all the steps are correct then our cluster is in GREEN & HEALTHY)
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+(enable RANGER in HDFS service)
+8. go to HDFS => Configuration => 
+	search Ranger authorization -> enabe it.
+
+9. go to Ranger => actions -> Setup Ranger Plugin Service
+	(refresh the RANGER tab) (we can see it add services, roles, policies by default)
+
+10. go to HIVE => Configuration =>
+	search Ranger -> enabe it.
+
+11. go to HIVE on TEZ => Configuration
+	search Ranger -> enabe it.
+
+12. go to YARN => Configuration => 
+	search Ranger -> enabe it.
+
+13. Stale Configuration HDFS
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+add a policy and try experimental things **********
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+Enable HDFS Data At Rest Encryption by 	Add Ranger KMS Service
+
+Ranger Key Management Service backed by Database => Add Ranger KMS Service =>
+	
+	Ranger KMS Master Key Password -> Mycomputer1 -> continue
+	
+	Restart stale services and redeploy client configuration
+
+goto HIVE on TEZ => Actions -> Create Ranger Plugin Audit Directory 
+
+goto Home => Actions -> Deploy Client Configuration
+
+Restart the Cluster
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+go to Ranger Web UI => copy ip address with port => open incognito window and paste it 
+
+	Login with = keyadmin
+	Password = Mycomputer1
+
+Edit KMS Policy -> Paste KMS URL and save it.
+(eg. KMS URL :- kms://https@ip-172-16-15-169.ec2.internal:9494/kms)
+
+
+on keyadmin tab
+goto Encryption => Key Management => Select SErvice => Add New Key => key name => save
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+go to Namenode CLI
+
+kinit hdfs
+klist
+
+hdfs dfs -mkdir /zone1
+hdfs dfs -ls /
+
+hdfs crypto -createZone -keyName key -path /zone1
+
+hdfs crypto -listZones
+
+hdfs dfs -put data /zone1
+(error -  User:hdfs not allowed to do 'DECRYPT_EEK' on 'key')
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+on keyadmin tab
+cm_kms => Add New policy => 
+		policy name - demo
+		Key Name - key
+		Allow Conditions -> Select user - centos
+						Permissions - Decrypt EEK
+		Save
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+goto Ranger Web UI
+cm_hdfs => Add New policy
+	
+	Policy Name -demo
+	Resource Path - /zone1
+	Allow Conditions -> Select user - centos
+					Permissions - Read & Write
+	save.
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+goto Namenode CLI
+
+kinit centos 
+klist
+
+hdfs dfs -ls /zone1
+hdfs dfs -put data /zone1
+hdfs dfs -ls /zone1
+hdfs dfs -cat /zone1/data
+(centos user is able to read the data)
+kdestroy
+
+Create a user in Microsoft Ad as user1
+kinit user1
+
+hdfs dfs -ls /zone1/data
+hdfs dfs -cat /zone1/data (erroe- User:user1 not allowed to do 'DECRYPT_EEK' on 'key')
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+Create Key from CLI ********************
+
+kinit keyadmin
+klist
+
+hadoop key list
+
+hadoop key create key1
+
+hadoop key list
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+*************** Check our compliance data is able to read from Linux layer*********
+
+kinit hdfs
+klist
+
+hdfs dfs -ls /
+hdfs fsck /zone1 -files -blocks -locations
+copy block number - blk_1073743428_2606 && datanode ip address - 172.16.15.169
+
+ssh datanode
+sudo -i
+cd /dfs/dn/current/
+find ./-name "Block name"
+cat <file path>
+------------------------------------------------------------------------------------------------------------------------------------------------------------

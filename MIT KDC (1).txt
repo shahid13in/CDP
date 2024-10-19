@@ -1,0 +1,292 @@
+*********************************************************************************************************
+**************************************MIT KERBEROS**************************************************************************************************************
+***************************************************************************************************
+
+<<<<<<<<<<<<<<<<< **TWO WAY AUTHENTICATION** >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 
+
+
+sudo yum install -y krb5-server
+
+yum list installed "krb?-*"
+
+hostname -f (ip-10-0-0-203.ec2.internal)
+
+sudo vi or sudo nano /etc/krb5.conf (client conf file)
+
+[libdefaults]
+default_realm = HADOOPSECURITY.COM
+dns_lookup_realm = false
+dns_lookup_kdc = false
+ticket_lifetime = 24h
+renew_lifetime = 7d
+forwardable = true
+
+default_tgs_enctypes = aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 arcfour-hmac-md5
+default_tkt_enctypes = aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 arcfour-hmac-md5
+ permitted_enctypes = aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 arcfour-hmac-md5
+
+[realms]
+ HADOOPSECURITY.COM = {
+  kdc =ip-172-31-88-224.ec2.internal
+  admin_server =ip-172-31-88-224.ec2.internal
+
+  max_renewable_life = 7d
+ }
+
+--use cm address for KDC server--
+
+
+sh ./clustercmd.sh sudo yum install krb5-workstation -y
+
+
+sudo vi or sudo nano /var/kerberos/krb5kdc/kadm5.acl
+
+*/admin@HADOOPSECURITY.COM *
+
+
+sudo vi or sudo nano /var/kerberos/krb5kdc/kdc.conf  (server conf file)
+
+[kdcdefaults]
+ kdc_ports = 88
+ kdc_tcp_ports = 88
+
+[realms]
+ HADOOPSECURITY.COM = {
+  #master_key_type = aes256-cts
+  acl_file = /var/kerberos/krb5kdc/kadm5.acl
+  dict_file = /usr/share/dict/words
+  admin_keytab = /var/kerberos/krb5kdc/kadm5.keytab
+  supported_enctypes = aes256-cts:normal aes128-cts:normal des3-hmac-sha1:normal arcfour-hmac:normal des-hmac-sha1:normal des-cbc-md5:normal des-cbc-crc:normal
+  max_renewable_life = 7d
+ }
+
+
+
+sudo kdb5_util create 
+
+
+sudo service krb5kdc start
+sudo service kadmin start
+
+sh putnmove.sh /etc/krb5.conf /etc/
+
+sh clustercmd.sh cat /etc/krb5.conf
+cat
+
+scp -i cdp.pem /etc/krb5.conf `cat cluster` /etc/
+scp -i cdp.pem krb5.conf `cat cluster` /etc/
+
+
+*ADD PRINC
+
+sudo kadmin.local
+addprinc cm/admin(For user as well as app)
+exit
+
+kinit cm/admin
+
+klist
+
+-------------------MIT Setup-----------------------------
+
+>>---Encrtption type--->>
+
+rc4-hmac
+des3-hmac-sha1
+arcfour-hmac
+des-hmac-sha1
+des-cbc-md5
+
+>>-------Kerberos Security Realm------>>
+
+HADOOPSECURITY.COM
+
+>>-----KDC Server----->>
+
+ip-172-31-44-160.ec2.internal
+
+>>-----KDC Admin Server host----->>
+
+ip-172-31-44-160.ec2.internal
+
+
+login as app 
+------------------------------------------------------------------------------------------------------------------------------
+
+******************************ACTIVE DIRECTORY****************************************************************************************************
+***************************************************************************************************************
+
+From the AWS console, launch a Microsoft Server 2012 R2 Base AMI into the same VPC with the same security group as the cluster
+Use Microsoft remote desktop to connect, after you've obtained the administrator password from the EC2 console. NOTE you might
+need to update your microsoft remote desktop client.
+
+Server manager > local server > computer name > change to HADOOP-AD
+
+**Restart later
+
+Dashboard
+Click add roles and features
+Add the DNS server (disregard static IP)
+Even if you click allow restart, it won't restart
+Restart server at this point
+Local server > task > shutdown local server
+
+Restart:-1
+
+Add roles and features
+Active Directory Domain Service
+Install
+Click promote to directory server
+Click add new forest
+use HADOOPSECURITY.LOCAL as the domain
+And give the strong password
+Restart:-2(Auto)
+-------------------------------------------
+AD server in the hosts file on every node in the cluster.
+
+Install openldap-clients and krb5-workstation if it's not there.
+
+sh clustercmd.sh sudo yum install openldap-clients -y
+sh clustercmd.sh sudo yum install krb5-workstation -y
+
+openssl s_client -connect hadoop-ad.hadoopsecurity.local:636
+
+nano /etc/hosts
+10.0.0.186 hadoop-ad.hadoopsecurity.local
+
+sh putnmove.sh hosts /etc/hosts /etc/
+
+openssl s_client -connect hadoop-ad.hadoopsecurity.local:636
+
+-----------------------------------------------------------------------------
+
+Add roles and features
+Active Directory Certificate Service
+Configure Active Directory certificate service on the destination service
+Next walk through Add roles and service
+Click next through wizard, making sure to install a CA
+Click on configure AD cert service
+Keep defaults on everything
+Click Certification Authority Role
+Setup type Enterprise CA. This is critical.
+Root CA is selected
+Keep default encryption types
+NOTE the distinguished name suffix
+DC=hadoopsecurity,DC=local
+:q!CN=hadoopsecurity-HADOOP-AD-
+CA,DC=hadoopsecuritycurity,DC=local
+Active Directory will serve LDAPS after reboot
+
+Now it's time to configure AD for use with CM
+Rightclick on the domain, add new OU
+Add user cm to OU
+Rightclick on domain, delegate control wizard
+Assign create user privs to cm
+
+
+-------------Authentication mechanism setup----------------
+
+On Hue
+
+>>Authentication Backend
+
+desktop.auth.backend.LdapBackend
+
+>> LDAP URL
+
+ldaps://hadoop-ad.hadoopsecurity.local
+
+
+
+>> LDAP bind user distinguished name(bind_name)
+
+cm
+
+>> LDAP bind password(bind_password)
+
+Manchester1
+
+>> Active Directory Domain(nt_domain)
+
+hadoopsecurity.local
+
+-----------------------------------------------------
+
+****KDC setup for AD*******
+
+>> Kerberos Encryption Types >>
+
+rc4-hmac(By default)
+
+>> Kerberos security realm >>
+
+HADOOPSECURITY.LOCAL
+
+>> KDC server host >>
+
+hadoop-ad.hadoopsecurity.local
+
+>> KDC Admin server host >>
+
+hadoop-ad.hadoopsecurity.local
+
+>> Active Directory Suffix >>
+
+ou=hadoop,DC=hadoopsecurity,DC=local
+
+
+-------------------------------------------------
+move from MIT to AD
+stop the cluster
+delete the credentials
+change the KDC type and conf
+
+
+************configured client conf***********************
+
+nano /etc/krb5.conf
+
+[libdefaults]
+ default_realm = HADOOPSECURITY.LOCAL
+ dns_lookup_realm = false
+ dns_lookup_kdc = false
+ ticket_lifetime = 24h
+ renew_lifetime = 7d
+ forwardable = true
+
+
+
+ #default_tgs_enctypes = aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 arcfour-hmac-md5
+ #default_tkt_enctypes = aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 arcfour-hmac-md5
+ #permitted_enctypes = aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96 arcfour-hmac-md5
+
+default_tgs_enctypes = rc4-hmac des3-hmac-sha1 arcfour-hmac des-hmac-sha1 des-cbc-md5 des-cbc-crc
+default_tkt_enctypes = rc4-hmac des3-hmac-sha1 arcfour-hmac des-hmac-sha1 des-cbc-md5 des-cbc-crc
+permitted_enctypes = rc4-hmac des3-hmac-sha1 arcfour-hmac des-hmac-sha1 des-cbc-md5 des-cbc-crc
+
+[realms]
+ HADOOPSECURITY.LOCAL = {
+  kdc = hadoop-ad.hadoopsecurity.local
+  admin_server = hadoop-ad.hadoopsecurity.local
+  max_renewable_life = 7d
+ }
+
+
+sh putnmove.sh krb5.conf /etc/
+-------------
+import kerberos credentials
+username-cm
+password-Manchester1
+
+
+--------------
+Generate missing credentials
+(In AD you will see some user's already created)
+
+------------------
+Now, restart the cluster
+
+
+
+
+------------------------------------------------------------------------------------
